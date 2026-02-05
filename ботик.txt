@@ -1,0 +1,203 @@
+
+import re
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
+from openai import OpenAI
+
+
+
+
+
+
+OPENROUTER_API_KEY ='#ВАШ_API_KEY'
+TELEGRAM_TOKEN ='#ВАШ_ТОКЕН'
+
+# Инициализация клиента OpenRouter
+client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_API_KEY)
+
+# Системный промпт для туристического помощника
+SYSTEM_PROMPT = """Ты профессиональный туристический гид-планировщик. Твоя задача — создавать детальные,
+персонализированные маршруты путешествий по Коломне на основе запросов пользователей.
+
+ФОРМАТ ОТВЕТА (обязательно соблюдай эту структуру):
+
+
+
+🗺️ МАРШРУТ:
+
+ДЕНЬ 1: [Тема дня]
+🕘 09:00 - [Активность 1]
+📍 [Место, адрес или район]
+💡 [Краткое описание]
+
+🕐 13:00 - [Активность 2]
+📍 [Место]
+💡 [Описание]
+
+🕔 17:00 - [Активность 3]
+📍 [Место]
+💡 [Описание]
+
+(продолжай по дням в зависимости от продолжительности поездки)
+
+💡 ПРАКТИЧЕСКИЕ СОВЕТЫ:
+• [Совет 1]
+• [Совет 2]
+• [Совет 3]
+
+🍽️ ГДЕ ПОЕСТЬ:
+• [Ресторан 1] - [кухня, бюджет, особенности]
+• [Ресторан 2] - [кухня, бюджет, особенности]
+
+
+
+
+
+
+
+ПРАВИЛА:
+1. Будь конкретным — называй реальные места, рестораны, музеи
+2. Учитывай бюджет пользователя (эконом/средний/премиум)
+3. Распределяй активности логически по районам
+4. Давай реалистичные временные интервалы
+5. Добавляй инсайдерские советы
+6. Используй эмодзи для наглядности
+7. Твой ответ должен быть по длине максимум 4096 симоволов """
+
+async def start(update: Update, context: CallbackContext):
+   
+    welcome_text = """🌍 *Добро пожаловать в Кузнец путешествий!*
+
+Я помогу вам спланировать идеальное путешествие с помощью искусственного интеллекта.
+
+*Как это работает:*
+1. 📝 Опишите вашу поездку в одном сообщении
+2. 🤖 Я проанализирую ваш запрос
+3. 🗺️ Создам детальный персонализированный маршрут
+
+*Что нужно указать в запросе:*
+🏙️ *Город* — куда едете
+📅 *Даты* — когда и на сколько дней
+👥 *Кто едет* — один, пара, семья, друзья
+🎯 *Интересы* — что хотите увидеть/попробовать
+💰 *Бюджет* — экономный, средний или неограниченный
+
+*Примеры запросов:*
+• " 3 дня в июне, пара, история и архитектура, средний бюджет"
+• " Выходные в мае, один, музеи и парки, экономно"
+• " Неделя в августе, семья с детьми, пляж и развлечения"
+• " 5 дней в апреле, друзья, искусство и еда, готовы тратить"
+
+*Просто напишите ваш запрос ниже:* 👇"""
+
+    await update.message.reply_text(welcome_text, parse_mode='Markdown')
+
+async def handle_message(update: Update, context: CallbackContext):
+    """Обработка запросов пользователя и генерация маршрута"""
+    user_message = update.message.text.strip()
+    
+
+    
+    if len(user_message) < 10:
+        await update.message.reply_text(
+            "❌ *Запрос слишком короткий.*\n\n"
+            "Пожалуйста, опишите вашу поездку подробнее. Пример:\n",
+            
+            parse_mode='Markdown'
+        )
+        return
+
+    # Сообщение о начале обработки
+    status_msg = await update.message.reply_text(
+        "🎯 *Анализирую ваш запрос...*\n"
+        "Создаю персонализированный маршрут. Это займет около 30 секунд.",
+        parse_mode='Markdown'
+    )
+
+    try:
+        # Подготавливаем полный запрос для ИИ
+        full_prompt = f"""Запрос пользователя: {user_message}
+Проанализируй этот запрос и создай детальный туристический маршрут.
+Учти все детали, которые указал пользователь. Будь максимально конкретным и полезным."""
+
+        # Отправка запроса к нейросети
+        completion = client.chat.completions.create(
+            model="deepseek/deepseek-r1-0528:free",  
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": full_prompt}
+            ],
+            temperature=0.3,
+            max_tokens=2000
+        )
+
+        
+
+        # Обработка ответа
+        if completion and hasattr(completion, 'choices') and completion.choices:
+            choice = completion.choices[0]
+            content = choice.message.content
+
+            # Очистка и форматирование ответа
+            cleaned_content = re.sub(r'<.*?>', '', content).strip()
+
+            if cleaned_content:
+                
+
+                    
+                await status_msg.delete()
+
+                await update.message.reply_text(f"*🗺️ Ваш персональный маршрут:*\n\n{cleaned_content}", parse_mode='Markdown')
+
+                    
+                await update.message.reply_text(
+                        "✅ *Маршрут готов!*\n\n"
+                        "Хотите спланировать еще одну поездку? Просто напишите новый запрос.\n\n"
+                        ,
+                        parse_mode='Markdown'
+                    )
+                
+            else:
+                await status_msg.delete()
+                await update.message.reply_text(
+                    "❌ *Не удалось сгенерировать маршрут.*\n\n"
+                    "Попробуйте:\n"
+                    "1. Уточнить запрос\n"
+                    "2. Проверить интернет-соединение\n"
+                    "3. Попробовать позже",
+                    parse_mode='Markdown'
+                )
+                
+        else:
+            await status_msg.delete()
+            await update.message.reply_text(
+                "❌ *Ошибка генерации.*\n\n"
+                "Сервис временно недоступен. Пожалуйста, попробуйте через несколько минут.",
+                parse_mode='Markdown'
+            )
+    except Exception as e:
+        return f"❌ Ошибка подключения: {str(e)}"
+
+
+
+
+def main():
+    
+    
+    
+
+    
+
+    # Инициализация приложения
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
+
+    # Обработчики команд и сообщений
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+ 
+
+    
+    application.run_polling()
+    
+main()
